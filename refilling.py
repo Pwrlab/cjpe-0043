@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 import numpy as np
 from kneed import KneeLocator
 from scipy.misc import derivative
@@ -16,6 +15,9 @@ def refilling(ydata, default_point=30, kneed_process=True) -> np.array and list:
     # default_point is the default point to differ refilling and transpiration
     # kneed_process means automatic kneed point switch
     # Create the x-axis of the data
+
+    if np.all(ydata == 0):
+        return ydata, [np.nan, np.nan, np.nan]
     xdata = np.arange(len(ydata))
 
     if kneed_process == True:
@@ -34,17 +36,21 @@ def refilling(ydata, default_point=30, kneed_process=True) -> np.array and list:
             output_knees[0] = int(output_knees[0])
     else:
         output_knees = [default_point, ydata[default_point]]
-
+    if output_knees[0] == 0:
+        return ydata, [np.nan, np.nan, np.nan]
     # prediction refilling based on Midnight
     ydata_fit = ydata.copy()
-    ydata_fit[default_point:] = 0
+    ydata_fit[output_knees[0]:] = 0
     # Set return format
-    return ydata_fit, [sum(ydata_fit) / sum(ydata)]
+    return ydata_fit, [sum(ydata_fit), sum(ydata), sum(ydata_fit) / sum(ydata)]
 
 
 #  Line method, the prediction refilling method based on linear decay model
 def extended_line_refilling(ydata, default_point=10, kneed_process=True) -> np.array and list:
     # Create the x-axis of the data
+
+    if np.all(ydata == 0):
+        return ydata, [np.nan, np.nan, np.nan]
     xdata = np.arange(len(ydata))
 
     # The mothed to distinguishing transpiration and refilling
@@ -62,6 +68,8 @@ def extended_line_refilling(ydata, default_point=10, kneed_process=True) -> np.a
             output_knees[0] = int(output_knees[0])
     else:
         output_knees = [default_point, ydata[default_point]]
+    if output_knees[0] == 0:
+        return ydata, [np.nan, np.nan, np.nan]
 
     def fn_exp(x, b):
         return ydata[0] * np.exp(-b * x)
@@ -85,12 +93,14 @@ def extended_line_refilling(ydata, default_point=10, kneed_process=True) -> np.a
             ydata_fit[i] = 0
 
     # Set return format
-    return ydata_fit, [sum(ydata_fit) / sum(ydata)]
+    return ydata_fit, [sum(ydata_fit), sum(ydata), sum(ydata_fit) / sum(ydata)]
 
 
 #  Exp method, the prediction refilling method based on Exponential decay model.
 def extended_exp_refilling(ydata, default_point=10, kneed_process=True) -> np.array and list:
     # Create the x-axis of the data
+    if np.all(ydata == 0):
+        return ydata, [np.nan, np.nan, np.nan]
     xdata = np.arange(len(ydata))
 
     # The mothed to distinguishing transpiration and refilling
@@ -108,6 +118,8 @@ def extended_exp_refilling(ydata, default_point=10, kneed_process=True) -> np.ar
             output_knees[0] = int(output_knees[0])
     else:
         output_knees = [default_point, ydata[default_point]]
+    if output_knees[0] == 0:
+        return ydata, [np.nan, np.nan, np.nan]
 
     # prediction refilling based on Exponential decay model
     # Create Exponential model
@@ -128,12 +140,14 @@ def extended_exp_refilling(ydata, default_point=10, kneed_process=True) -> np.ar
         ydata_fit = ydata[0] * np.exp(-(((popt[0] + adjustment_step_len * num_step) * xdata).astype(np.float64)))
         num_step += 1
     # Set return format
-    return ydata_fit, [sum(ydata_fit) / sum(ydata)]
+    return ydata_fit, [sum(ydata_fit), sum(ydata), sum(ydata_fit) / sum(ydata)]
 
 
 # Et method, the prediction method based on extend transpiration inversion
 def extended_transpiration(ydata, default_point=10, kneed_process=True, min_strategy=True):
     # Create the x-axis of the data
+    if np.all(ydata == 0):
+        return ydata, [np.nan, np.nan, np.nan]
     xdata = np.arange(len(ydata))
 
     if kneed_process == True:
@@ -167,19 +181,4 @@ def extended_transpiration(ydata, default_point=10, kneed_process=True, min_stra
         popt, _ = curve_fit(fn_pushback, xdata[output_knees[0]:], ydata[output_knees[0]:])
         ydata_fit = popt[0] + 0 * ydata
     # Set return format
-    return ydata_fit, [sum(ydata_fit) / sum(ydata)]
-
-
-def plot_refilling(xdata, ydata, msg, channel, path):
-    # time_index_x 横轴 X
-    # y = np.vstack(y).transpose()
-    # y_2 = np.vstack(y_2).transpose()
-    plt.figure(figsize=(8, 8), dpi=40)
-    plt.figure(1)
-    plt.ylim(0, ydata.max() * 1.2)
-    plt.text(xdata.max() * 0.5, ydata.max() * 0.9, msg + '_' + channel)
-    plt.plot(xdata, ydata, 'o-')
-    # plt.plot(x, y_2)
-    address = path + msg + '_' + channel + '.png'
-    plt.savefig(address)
-    plt.clf()
+    return ydata_fit, [sum(ydata_fit), sum(ydata), sum(ydata_fit) / sum(ydata)]

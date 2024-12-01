@@ -1,0 +1,19 @@
+{
+    "refilling": {
+        "default_point": 30,
+        "kneed_process": false
+    },
+    "line": {
+        "default_point": 10,
+        "kneed_process": false
+    },
+    "exp": {
+        "default_point": 10,
+        "kneed_process": false
+    },
+    "et": {
+        "default_point": 10,
+        "kneed_process": false,
+        "min_strategy": true
+    }
+}
