@@ -1,0 +1,71 @@
+# Build stand-alone Refilling Tool v2 for Windows and macOS (no Python needed).
+# Artifacts appear on the workflow run page; pushing a tag "v2.*" also creates a GitHub Release.
+name: build-v2
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v2.*"]
+    branches: ["main", "master", "claude/**"]
+    paths: ["v2/**", ".github/workflows/build-v2.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e "v2[test]"
+      - run: cd v2 && python -m pytest -q
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, name: RefillingTool-Windows-x64 }
+          - { os: macos-latest, name: RefillingTool-macOS-AppleSilicon }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install
+        run: pip install -e v2 pyinstaller
+      - name: Build
+        working-directory: v2
+        run: pyinstaller --noconfirm packaging/refilltool.spec
+      - name: Smoke test (server answers)
+        shell: bash
+        working-directory: v2
+        run: |
+          export REFILLTOOL_NO_BROWSER=1 REFILLTOOL_PORT=8599
+          ./dist/RefillingTool/RefillingTool > run.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8599/_stcore/health; then echo " ok"; break; fi
+            sleep 2
+          done
+          curl -sf http://localhost:8599/_stcore/health || (cat run.log; exit 1)
+      - name: Add readme
+        shell: bash
+        run: cp v2/packaging/README_bundle.txt v2/dist/RefillingTool/README.txt
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path v2/dist/RefillingTool -DestinationPath ${{ matrix.name }}.zip
+      - name: Zip (macOS)
+        if: runner.os == 'macOS'
+        run: cd v2/dist && ditto -c -k --keepParent RefillingTool ../../${{ matrix.name }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v2.')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.name }}.zip

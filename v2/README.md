@@ -1,115 +1,113 @@
 # Refilling Tool v2
 
-夜间液流分解 (nighttime sap flow partitioning) 工具，PWRlab（北京林业大学）。
-方法原理见 [CJPE 2023.0043](https://www.plant-ecology.com/CN/10.17521/cjpe.2023.0043)。
+夜间液流组分划分 (nighttime sap flow partitioning) 工具，PWRlab（北京林业大学）。
+方法依据：毛白杨夜间液流组分划分方法对比，《植物生态学报》2023.0043（下称“原文”）。
 
-v2 在本地运行：数据不上传任何服务器，浏览器只连接本机 `localhost`。Mac 和 Windows 都可用。
+在本机运行，数据不离开电脑；界面只连接 `localhost`。Windows、macOS 均可使用。
 
-## 与 v1 相比
+## 下载与启动
 
-| | v1 | v2 |
-|---|---|---|
-| 运行平台 | Windows exe | Mac / Windows / Linux，本地浏览器界面 + 命令行 |
-| 输入 | xlsx，列名固定 | xlsx / csv，自动识别时间、辐射、样树列，可手动修改 |
-| 夜间划分 | 首尾不完整夜晚也参与计算；每夜少算日出前最后一个点 | 完整夜晚；自动标记不完整夜晚和缺测夜晚；可忽略夜间辐射噪声 |
-| 数据检查 | 无 | 缺测、重复时间、时间漂移、辐射异常值提示 |
-| 结果检查 | 只能看 Excel | 逐夜查看实测曲线、各方法拟合曲线和断点；可一键排除阴雨天 |
-| 晴天筛选 | 手动 | 按当日辐射总量 (MJ m⁻²) 自动筛选 |
-| 输出 | 宽表 | 长表 (long format，直接用于 R/ggplot2) + v1 风格宽表 + 参数记录 |
-| 依赖 | scipy==1.7.3（新版 Python 装不上） | 兼容当前 scipy / Python 3.9–3.13 |
-| 可复现性 | — | `--legacy` 模式与 v1 结果逐值一致（有自动测试） |
+**方式一：免安装版（推荐给不用 Python 的同学）**
 
-四种方法：Re (time segment)、Exp (exponential decay)、Line (linear decay)、Et (transpiration inversion)。`fit_sum` 统一为夜间充水量 (nocturnal refilling)，`remainder` 为夜间蒸腾量 (nocturnal transpiration)。
+在本仓库 GitHub 页面的 *Releases*（或 *Actions → build-v2* 的运行结果）下载：
 
-> **Et 法已按原文修正。** 原文 1.4.2(4)：以 Re 法拐点 P2 为后半夜起点，后半夜液流最小值作为整夜蒸腾速率；蒸腾 = 速率 × 整夜时长，充水 = 夜间液流 − 蒸腾。v1 代码与此不符：使用自己的断点（10 点而非 P2），且输出的是“P2 前实测液流 + 蒸腾基线”，混合了两个组分。在示例数据上，两者逐夜充水比例的绝对差中位数为 0.32。Re、Exp、Line 与 v1 一致。`--legacy` 模式仍保留 v1 的 Et 算法，用于复现旧结果。
+- `RefillingTool-Windows-x64.zip`：解压后双击 `RefillingTool.exe`
+- `RefillingTool-macOS-AppleSilicon.zip`：解压后双击 `RefillingTool`（首次：右键 → 打开）
 
-## 安装与启动
+浏览器自动打开 `http://localhost:8501`。关闭黑色命令窗口即退出。
 
-需要 Python ≥ 3.9。
+**方式二：已装 Python 3.9+**
 
-**双击启动**（首次运行自动安装依赖，约 1–3 分钟）：
-- Mac：双击 `start_mac.command`（若提示无法打开：右键 → 打开）
+- macOS：双击 `start_mac.command`
 - Windows：双击 `start_windows.bat`
 
-浏览器会自动打开 `http://localhost:8501`。
+首次运行自动安装依赖（1–3 min；PyPI 连接慢时自动改用清华镜像）。
 
-**命令行**：
+**方式三：命令行**
 
 ```bash
-cd v2
-python3 -m pip install -e .
-refilltool gui                                  # 图形界面
-refilltool run data.xlsx -o results             # 四种方法全部计算
-refilltool run data.csv -m refilling exp --fitting
-refilltool run data.xlsx --min-day-rad 15       # 只保留当日辐射 >= 15 MJ m-2 的夜晚
-refilltool run data.xlsx --legacy               # 复现 v1 结果
-refilltool init-config my.json                  # 生成参数文件，修改后用 -c my.json
+cd v2 && python3 -m pip install -e .
+refilltool gui                                   # 图形界面
+refilltool run data.xlsx -o results              # 批量计算
+refilltool run data.csv --max-rain 0 --area T1_1.3m=0.0123 T1_7.0m=0.0098
+refilltool run data.xlsx -c my_config.json       # 用保存的参数复现
+refilltool run data.xlsx --legacy                # 复现 v1 结果
 ```
 
-v1 的 `config.json` 可直接用 `-c config.json` 读取。
+## 计算方法（与原文对应）
+
+| 步骤 | 原文 | v2 实现 |
+|---|---|---|
+| 夜间 | 1.3：R < 5 W m⁻² | 阈值可调；短于 30 min 的辐射噪声不切断夜晚；首尾不完整、含缺测的夜晚自动剔除 |
+| 液流量 | 公式 (1)：Q = Σ Fd·t·As | 自动检测采样间隔 t；填写边材面积 As 后单位为 mL night⁻¹，否则为 mL m⁻² night⁻¹ |
+| 拐点 | 1.5：先平滑，Kneedle（convex, decreasing）检测 P1（快→慢衰减）和 P2（液流基本停止变化） | 默认自动检测；检测失败或早于 30 min 时使用固定值（P1 100 min，P2 300 min）；每个结果记录拐点来源 |
+| Re 法 | P2 前为充水，P2 后为蒸腾 | 同原文 |
+| Line 法 | 滞后期（约 90 min）结束时液流曲线的切线，切线下方为充水 | 滞后期可调；切线斜率取滞后期内指数拟合在该点的导数；充水不超过实测液流 |
+| Exp 法 | P1 前指数拟合 a·e^(−bt)，梯度下降调整 b 使曲线落在液流下方 | 直接求出满足条件的最小 b（梯度下降的精确解，不受 500 步上限影响）；充水不超过实测液流 |
+| Et 法 | P2 后液流最小值作为整夜蒸腾速率；蒸腾 = 速率 × 时长，其余为充水 | 同原文（v1 代码此处有误，见下） |
+| 高度差预测充水法 | 1.4.3：A = Q1.3m − Q7.0m（公式 2、6），上部液流用 Line 法分为 B 冠层充水、C 夜间蒸腾 | 列名如 `T1_1.3m`、`T1_7.0m` 自动配对，也可手动指定；上部方法可选 |
+| 方法评估 | 1.5：C1 与 C2、A1 = (A1+B1) − B2 与 Ah 的 t 检验 | 每棵树及全部树合并输出均值、SE、偏差 %、独立样本与配对 t 检验 P 值，并提示偏差最小的方法 |
+| 雨天 | 1.5：只用无降雨日 | 有降雨列时自动剔除当日至夜间结束有降雨的夜晚 |
+| 环境因子 | 2.3：夜间均值与组分的相关 | VPD、温度、湿度、土壤水分、风速列自动识别，输出夜间均值，界面可看散点与 Pearson r |
+
+所有方法输出统一：`fit_sum` = 夜间充水 (refilling)，`remainder` = 夜间蒸腾 (transpiration)，`ratio` = 充水占比。
+
+### 与 v1 程序的差别
+
+- **Et 法已按原文修正。** v1 代码没有用 Re 法的 P2（用的是 10 个点），且输出“P2 前实测液流 + 蒸腾基线”，混合了两个组分。示例数据上两者逐夜充水占比的绝对差中位数为 0.32。
+- v1 默认使用固定断点（点数），v2 默认按原文自动检测拐点，参数以分钟表示，5、10、30 min 数据通用。
+- v1 只对记录直接求和，v2 按原文公式 (1) 乘以采样间隔（及边材面积）。占比 (ratio) 不受影响。
+- `--legacy`（界面“v1 兼容模式”）与 v1 程序逐值一致，有自动测试保证。
 
 ## 数据格式
 
-一列时间、一列太阳辐射 (W m⁻²)、其余每列一棵样树的液流。列名任意，常见写法会被自动识别：
+一列时间、一列太阳辐射 (W m⁻²)、若干列液流通量密度 Fd（建议 mL m⁻² s⁻¹）。可选：降雨列、环境因子列。列名任意，常见写法自动识别：
 
-| time | solar_radiation | Tree1 | Tree2 |
-|---|---|---|---|
-| 2024-06-01 00:00 | 0 | 0.012 | 0.020 |
-| 2024-06-01 00:10 | 0 | 0.011 | 0.019 |
+| time | solar_radiation | rain_mm | VPD_kPa | T1_1.3m | T1_7.0m |
+|---|---|---|---|---|---|
+| 2021-07-01 00:00 | 0 | 0 | 0.42 | 0.0213 | 0.0141 |
 
-时间步长自动检测（5 min、10 min、30 min 均可）。缺测记录会自动补成空值，含空值的夜晚不参与计算并在结果中注明原因。
-
-## 参数
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `default_point` | Re 30；其他 10 | 断点 (breakpoint)，即夜间开始后的点数。界面上按检测到的步长换算；10 min 数据的 30 点 = 5 h |
-| `kneed_process` | false | 自动检测拐点 (Kneedle)。仅适用于夜间数据质量高的情况 |
-| `min_strategy` | true | Et 法蒸腾速率：true = 后半夜最小值（原文）；false = 后半夜均值 |
-| `threshold` | 5 W m⁻² | 辐射 ≤ 阈值为夜间 |
-| `min_run_minutes` | 30 | 短于该时长的昼夜切换被忽略（夜间辐射噪声、白天短暂阴暗） |
-| `drop_partial` / `drop_gap` | true | 去掉首尾不完整夜晚 / 有缺测的夜晚 |
-| `min_day_rad_MJ` | 0 | 晴天筛选；0 表示不筛选 |
-| `exclude_nights` | [] | 手动排除的夜晚（编号或日期 `YYYY-MM-DD`） |
+`examples/synthetic_demo_two_heights.csv` 是**合成数据**（由 `examples/make_synthetic_demo.py` 生成，非实测），用于演示高度差法的输入格式。
 
 ## 输出
 
-Excel 文件包含：
+Excel 文件（同时输出 CSV 和参数 JSON）：
 
-- `README`：输入文件、时间步长、全部参数（可复现）
-- `summary`：长表，每行 = 夜晚 × 样树 × 方法；列 `night_sum`（夜间实测液流总和）、`fit_sum`（夜间充水量）、`remainder = night_sum − fit_sum`（夜间蒸腾量）、`ratio = fit_sum / night_sum`、`breakpoint`、`status`
-- `nights`：每个夜晚的起止时间、点数、标记、当日辐射总量与最大值
-- `<method>_ratio / _fit_sum / _night_sum`：与 v1 相同结构的宽表（v1 的 `_rate / _night_sum / _sum`）
-- `<method>_fitting`（可选）：逐点实测值与拟合值
+| 工作表 | 内容 |
+|---|---|
+| README | 输入文件、步长、单位、全部参数 |
+| overview | 每个方法 × 每列的充水占比均值 ± SE、充水量、蒸腾量 |
+| summary | 长表：夜晚 × 列 × 方法（可直接用于 R/ggplot2） |
+| nights | 每夜起止时间、标记、当日辐射、降雨、环境因子夜间均值 |
+| height_diff | 高度差法 A、B、C 及占比 |
+| method_evaluation | 原文 1.5 的方法评估 |
+| `<method>_ratio / _fit_sum / _night_sum` | 与 v1 相同结构的宽表 |
+| `<method>_fitting`（可选） | 逐点实测值与充水曲线 |
 
-## 使用前必读
+## 使用建议
 
-- 方法用于典型晴天。建议用晴天筛选或在“逐夜检查”中排除阴雨天。
-- 自动拐点只在夜间数据质量高时使用，否则用固定断点。
-- 辐射需要校准；白天低于 5 W m⁻² 或夜间高于 5 W m⁻² 的异常会在“数据检查”中提示。
-- 液流数据的突变、异常值需要事先处理。
+- 方法适用于典型晴天。用降雨筛选、晴天筛选，或在“逐夜检查”中排除异常夜晚。
+- 在“逐夜检查”里看拐点位置是否合理；不合理时调整平滑窗口或改用固定时长。
+- 有两个高度探针时，先看“方法评估”，选偏差最小的方法再做后续分析。
+- 辐射需要校准；液流的突变、异常值需要事先处理。
 
-## 测试
+## 开发
 
 ```bash
 cd v2 && python3 -m pip install -e ".[test]" && python3 -m pytest -q
 ```
 
-包括合成数据测试和与 v1 原代码在 `example.xlsx` 上的逐值回归测试。
+测试包括：与 v1 原代码在 `example.xlsx` 上的逐值回归、各方法的原文公式检验、高度差法对已知茎干充水的还原、单位换算、降雨筛选等。
 
-## 文件结构
+免安装版由 GitHub Actions（`.github/workflows/build-v2.yml`）在 Windows 和 macOS 上用 PyInstaller 打包；推送 `v2.*` 标签时自动发布到 Releases。
 
 ```
 v2/
-├── src/refilltool/
-│   ├── methods.py    四种方法
-│   ├── nights.py     夜间划分
-│   ├── io.py         读取、列识别、数据清理
-│   ├── pipeline.py   计算流程与参数
-│   ├── export.py     Excel / CSV 输出
-│   ├── cli.py        命令行
-│   └── app.py        本地图形界面 (Streamlit)
-├── tests/
+├── src/refilltool/   methods.py 方法 · nights.py 夜间划分 · io.py 读取与列识别
+│                     pipeline.py 计算流程 · export.py 输出 · cli.py 命令行 · app.py 界面
+├── tests/            自动测试
+├── examples/         合成演示数据
+├── packaging/        免安装版打包脚本
 ├── start_mac.command
 └── start_windows.bat
 ```

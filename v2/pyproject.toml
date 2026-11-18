@@ -16,7 +16,7 @@ dependencies = [
   "kneed>=0.8",
   "openpyxl>=3.0",
   "plotly>=5.0",
-  "streamlit>=1.30",
+  "streamlit>=1.50",
 ]
 
 [project.optional-dependencies]

@@ -142,3 +142,99 @@ def test_et_follows_paper():
     assert r.breakpoint == 30  # Re breakpoint P2
     assert np.isclose(r.fit_sum, y.sum() - base * len(y))
     assert np.isclose(r.extra["transpiration_sum"], base * len(y))
+
+
+# ------------------------------------------------------------------ v2 paper-aligned features
+def _night(n=70, b=0.06, base=0.05, amp=0.3):
+    x = np.arange(n)
+    return amp * np.exp(-b * x) + base
+
+
+def test_knees_ordered_and_breakpoints_resolved():
+    y = _night()
+    p1, p2 = methods.detect_knees(y, 3)
+    assert p1 is not None and p2 is not None and p1 <= p2
+    bps = methods.resolve_breakpoints(y, 10, {"mode": "auto"})
+    assert bps["p1_src"] == "auto" and bps["p1"] <= bps["p2"]
+    assert bps["lag"] == 9  # 90 min at 10 min step
+    fixed = methods.resolve_breakpoints(y, 5, {"mode": "fixed"})
+    assert (fixed["p1"], fixed["p2"], fixed["lag"]) == (20, 60, 18)  # minutes -> points at 5 min
+
+
+@pytest.mark.parametrize("name", list(methods.FUNCS))
+def test_partition_refilling_never_exceeds_flow(name):
+    rng = np.random.default_rng(0)
+    y = _night() + rng.normal(0, 0.004, 70)
+    bps = methods.resolve_breakpoints(y, 10, {"mode": "auto"})
+    r = methods.partition(name, y, bps)
+    assert r.status == "ok"
+    assert np.all(r.fit <= y + 1e-12) and np.all(r.fit >= 0)
+    assert 0 <= r.ratio <= 1
+
+
+def test_exp_exact_constraint():
+    y = _night()
+    y[3] *= 0.9  # dip below the fitted curve inside the fitting period
+    bps = {"p1": 15, "p2": 30, "lag": 9}
+    r = methods.partition("exp", y, bps)
+    assert r.extra["decay_b_adjusted"] >= r.extra["decay_b"]
+    assert np.all(r.fit[:15] <= y[:15] + 1e-12)
+
+
+def test_et_partition_matches_paper():
+    y = _night()
+    r = methods.partition("et", y, {"p1": 10, "p2": 30, "lag": 9})
+    base = y[30:].min()
+    assert np.isclose(r.fit_sum, np.sum(y - base))
+
+
+def test_units_time_and_sapwood_area():
+    ds = io.prepare(synthetic())
+    r0 = pipeline.run(ds, {"units": {"integrate_time": False}, "methods": ["refilling"]})
+    r1 = pipeline.run(ds, {"units": {"sapwood_area_m2": {"T1": 0.01, "T2": 0.02}}, "methods": ["refilling"]})
+    a = r0.summary.query("status == 'ok' and tree == 'T2'").night_sum.values
+    b = r1.summary.query("status == 'ok' and tree == 'T2'").night_sum.values
+    assert np.allclose(b, a * 600 * 0.02)
+    assert r1.unit.startswith("mL night-1")
+
+
+def test_detect_pairs_and_rain():
+    assert io.detect_pairs(["T1_1.3m", "T1_7.0m", "X"]) == [{"name": "T1", "lower": "T1_1.3m", "upper": "T1_7.0m"}]
+    df = synthetic(days=5)
+    df["rain"] = 0.0
+    df.loc[df.TIMESTAMP == "2024-06-03 15:00", "rain"] = 2.0
+    ds = io.prepare(df, rain_col="rain")
+    r = pipeline.run(ds)
+    st = r.nights.set_index(r.nights.night_start.dt.date.astype(str)).status
+    assert st["2024-06-03"] == "rain" and st["2024-06-02"] == "used"
+
+
+def test_height_difference_recovers_stem_refilling():
+    """Lower sensor = upper + stem refilling: A must equal the stem component (eq. 2)."""
+    df = synthetic(days=6)
+    t = df.TIMESTAMP
+    night = df["Rs (W/m2)"].values <= 5
+    k = np.zeros(len(df))
+    for i in range(1, len(df)):
+        k[i] = k[i - 1] + 1 if night[i] else 0
+    stem = np.where(night, 0.02 * np.exp(-0.03 * k), 0)
+    df = pd.DataFrame({"time": t, "Rs": df["Rs (W/m2)"], "T1_7.0m": df["T1"], "T1_1.3m": df["T1"] + stem})
+    ds = io.prepare(df, rad_col="Rs")
+    cfg = {"height_diff": {"pairs": io.detect_pairs(ds.tree_cols)},
+           "units": {"sapwood_area_m2": {"T1_1.3m": 0.01, "T1_7.0m": 0.01}}}
+    r = pipeline.run(ds, cfg)
+    assert len(r.height) >= 3 and len(r.evaluation) == 4
+    for row in r.height.itertuples():
+        nt = r.night_objs[row.night_id - 1]
+        true_a = stem[nt.start:nt.end].sum() * 600 * 0.01
+        assert np.isclose(row.A_stem_refilling, true_a, rtol=1e-6)
+        assert np.isclose(row.A_stem_refilling + row.B_canopy_refilling + row.C_transpiration, row.Q_lower)
+
+
+def test_config_roundtrip(tmp_path):
+    cfg = pipeline.merge_config({"breakpoints": {"mode": "fixed"}, "night": {"max_rain_mm": 1}})
+    p = tmp_path / "c.json"
+    pipeline.save_config(cfg, p)
+    back = pipeline.load_config(p)
+    assert back["breakpoints"]["mode"] == "fixed" and back["night"]["max_rain_mm"] == 1
+    assert back["breakpoints"]["p2_minutes"] == 300

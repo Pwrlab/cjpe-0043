@@ -8,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 
 TIME_PAT = re.compile(r"^(time|date|datetime|timestamp|时间|日期)", re.I)
+RAIN_PAT = re.compile(r"(rain|precip|^p$|^p\(|降雨|降水|雨量)", re.I)
+COV_PAT = re.compile(r"(vpd|^ta\b|^t_?air|temp|^rh\b|humid|swc|soil|vwc|wind|^ws\b|^u\b|温度|湿度|土壤|含水|风速|饱和差)", re.I)
 RAD_PAT = re.compile(r"(solar|radiation|^rad|^(rs|sr|rg|swin|sw_in|par)\b|辐射|短波)", re.I)
 
 
@@ -19,6 +21,8 @@ class Dataset:
     tree_cols: list
     step: pd.Timedelta | None
     messages: list = field(default_factory=list)
+    rain_col: str | None = None
+    cov_cols: list = field(default_factory=list)
 
     @property
     def step_minutes(self):
@@ -48,12 +52,23 @@ def detect_columns(df: pd.DataFrame):
                 break
     rad_col = next((c for c in cols if c != time_col and RAD_PAT.search(c)), None)
     trees = [c for c in cols if c not in (time_col, rad_col)
-             and pd.api.types.is_numeric_dtype(df[c])]
+             and pd.api.types.is_numeric_dtype(df[c])
+             and not RAIN_PAT.search(c) and not COV_PAT.search(c)]
     return time_col, rad_col, trees
 
 
+def detect_covariates(df: pd.DataFrame):
+    """Environmental columns (VPD, temperature, humidity, soil water, wind)."""
+    return [str(c) for c in df.columns if COV_PAT.search(str(c))
+            and pd.api.types.is_numeric_dtype(df[c])]
+
+
+def detect_rain(df: pd.DataFrame):
+    return next((str(c) for c in df.columns if RAIN_PAT.search(str(c))), None)
+
+
 def prepare(df: pd.DataFrame, time_col=None, rad_col=None, tree_cols=None,
-            regularize=True) -> Dataset:
+            regularize=True, rain_col=None, cov_cols=None) -> Dataset:
     """Clean a raw table. With ``regularize`` the series is put on a regular
     time grid so that missing records appear as NaN (and are then flagged)."""
     df = df.copy()
@@ -61,7 +76,12 @@ def prepare(df: pd.DataFrame, time_col=None, rad_col=None, tree_cols=None,
     t0, r0, tr0 = detect_columns(df)
     time_col = time_col or t0
     rad_col = rad_col or r0
-    tree_cols = list(tree_cols) if tree_cols else tr0
+    cov_cols = [c for c in (cov_cols or []) if c not in (time_col, rad_col, rain_col)]
+    if tree_cols:
+        tree_cols = list(tree_cols)
+    else:  # auto: numeric columns that are not rain or covariates
+        rain_auto = detect_rain(df)
+        tree_cols = [c for c in tr0 if c not in (rain_col, rain_auto, *cov_cols)]
     msgs = []
     if time_col is None or rad_col is None:
         raise ValueError("Cannot find the time or solar radiation column; please select them manually.")
@@ -73,9 +93,10 @@ def prepare(df: pd.DataFrame, time_col=None, rad_col=None, tree_cols=None,
     if bad:
         msgs.append(f"Dropped {bad} rows with unreadable time.")
         df = df.dropna(subset=[time_col])
-    for c in [rad_col, *tree_cols]:
+    extra = [c for c in [rain_col, *cov_cols] if c and c not in tree_cols]
+    for c in [rad_col, *tree_cols, *extra]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df[[time_col, rad_col, *tree_cols]]
+    df = df[[time_col, rad_col, *tree_cols, *extra]]
 
     # Logger clocks often drift by milliseconds (e.g. 00:10:00.001): round to seconds
     df[time_col] = df[time_col].dt.round("s")
@@ -107,7 +128,7 @@ def prepare(df: pd.DataFrame, time_col=None, rad_col=None, tree_cols=None,
         n_nan = int(df[c].isna().sum())
         if n_nan:
             msgs.append(f"{c}: {n_nan} missing values; affected nights are skipped.")
-    return Dataset(df, time_col, rad_col, tree_cols, step, msgs)
+    return Dataset(df, time_col, rad_col, tree_cols, step, msgs, rain_col, cov_cols)
 
 
 def load(path, sheet=0, **kw) -> Dataset:
@@ -135,3 +156,22 @@ def daily_radiation(ds: Dataset) -> pd.DataFrame:
     return out
 
 
+
+
+HEIGHT_PAT = re.compile(r"^(?P<name>.*?)[\s_\-@]*(?P<h>\d+(?:\.\d+)?)\s*m$", re.I)
+
+
+def detect_pairs(columns):
+    """Pair sensors of one tree at two heights from names like 'T1_1.3m' / 'T1_7.0m'."""
+    groups = {}
+    for c in columns:
+        m = HEIGHT_PAT.match(str(c).strip())
+        if m:
+            groups.setdefault(m.group("name"), []).append((float(m.group("h")), str(c)))
+    pairs = []
+    for name, items in groups.items():
+        if len(items) == 2:
+            (h1, c1), (h2, c2) = sorted(items)
+            if h1 != h2:
+                pairs.append({"name": name or c1, "lower": c1, "upper": c2})
+    return pairs

@@ -166,3 +166,6 @@ cython_debug/
 v2/.venv/
 v2/results/
 *.egg-info/
+v2/dist/
+v2/build/
+v2/examples/*.xlsx
