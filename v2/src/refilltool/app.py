@@ -96,6 +96,9 @@ with st.sidebar.expander("断点与拟合 (breakpoint & fit)"):
     for m in methods:
         d = DEFAULT_CONFIG["params"][m]
         st.markdown(f"**{METHOD_LABELS[m]}**")
+        if m == "et":
+            st.caption("按原文 1.4.2(4)：使用 Re 法断点 P2，后半夜液流最小值作为整夜蒸腾速率。"
+                       "下面的断点仅在 v1 兼容模式下生效。")
         c1, c2 = st.columns(2)
         cfg["params"][m]["default_point"] = c1.number_input("断点 (points)", 1, 500, d["default_point"],
                                                             key=f"bp_{m}", help=HELP_BP)
@@ -104,7 +107,8 @@ with st.sidebar.expander("断点与拟合 (breakpoint & fit)"):
                                                         help="Kneedle 自动检测拐点；仅适用于夜间数据质量高的情况。")
         if m == "et":
             cfg["params"][m]["min_strategy"] = st.checkbox("最小值策略 (min strategy)", d["min_strategy"],
-                                                           key="et_min")
+                                                           key="et_min",
+                                                           help="勾选=后半夜最小值（原文方法）；不勾选=后半夜均值。")
 with st.sidebar.expander("夜间划分与筛选 (night & filter)"):
     nc = cfg["night"]
     nc["threshold"] = st.number_input("夜间辐射阈值 (W m⁻²)", 0.0, 100.0, 5.0, 0.5)

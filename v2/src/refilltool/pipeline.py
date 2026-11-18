@@ -130,7 +130,8 @@ def run(ds: Dataset, config: dict | None = None, progress=None) -> Result:
                 if reason:
                     rows.append(_row(nt, tree, m, None, reason))
                     continue
-                res = run_method(m, y, cfg["params"].get(m), legacy=cfg["legacy"])
+                res = run_method(m, y, cfg["params"].get(m), legacy=cfg["legacy"],
+                                 re_params=cfg["params"].get("refilling"))
                 fits[(nt.night_id, tree, m)] = res.fit
                 rows.append(_row(nt, tree, m, res, res.status, ds))
         if progress:

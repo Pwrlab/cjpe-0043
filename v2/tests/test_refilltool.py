@@ -131,3 +131,14 @@ def test_legacy_mode_matches_v1(monkeypatch):
             both = ~np.isnan(ref)
             assert np.allclose(ref[both], mine[both], rtol=1e-6, atol=1e-10), (m, v1_key)
             assert np.isnan(mine[np.isnan(ref)]).all() or v1_key == "sum"
+
+
+def test_et_follows_paper():
+    """Paper 1.4.2 (4): T = n * min(flow after P2); refilling = Qn - T."""
+    x = np.arange(70)
+    y = 0.3 * np.exp(-0.08 * x) + 0.05
+    r = methods.run_method("et", y, None)
+    base = y[30:].min()
+    assert r.breakpoint == 30  # Re breakpoint P2
+    assert np.isclose(r.fit_sum, y.sum() - base * len(y))
+    assert np.isclose(r.extra["transpiration_sum"], base * len(y))

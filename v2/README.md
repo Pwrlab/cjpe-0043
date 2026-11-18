@@ -19,7 +19,9 @@ v2 在本地运行：数据不上传任何服务器，浏览器只连接本机 `
 | 依赖 | scipy==1.7.3（新版 Python 装不上） | 兼容当前 scipy / Python 3.9–3.13 |
 | 可复现性 | — | `--legacy` 模式与 v1 结果逐值一致（有自动测试） |
 
-四种方法的数学过程与 v1 相同：Re (time segment)、Exp (exponential decay)、Line (linear decay)、Et (extended transpiration)。
+四种方法：Re (time segment)、Exp (exponential decay)、Line (linear decay)、Et (transpiration inversion)。`fit_sum` 统一为夜间充水量 (nocturnal refilling)，`remainder` 为夜间蒸腾量 (nocturnal transpiration)。
+
+> **Et 法已按原文修正。** 原文 1.4.2(4)：以 Re 法拐点 P2 为后半夜起点，后半夜液流最小值作为整夜蒸腾速率；蒸腾 = 速率 × 整夜时长，充水 = 夜间液流 − 蒸腾。v1 代码与此不符：使用自己的断点（10 点而非 P2），且输出的是“P2 前实测液流 + 蒸腾基线”，混合了两个组分。在示例数据上，两者逐夜充水比例的绝对差中位数为 0.32。Re、Exp、Line 与 v1 一致。`--legacy` 模式仍保留 v1 的 Et 算法，用于复现旧结果。
 
 ## 安装与启动
 
@@ -63,7 +65,7 @@ v1 的 `config.json` 可直接用 `-c config.json` 读取。
 |---|---|---|
 | `default_point` | Re 30；其他 10 | 断点 (breakpoint)，即夜间开始后的点数。界面上按检测到的步长换算；10 min 数据的 30 点 = 5 h |
 | `kneed_process` | false | 自动检测拐点 (Kneedle)。仅适用于夜间数据质量高的情况 |
-| `min_strategy` | true | Et 方法的基线算法 |
+| `min_strategy` | true | Et 法蒸腾速率：true = 后半夜最小值（原文）；false = 后半夜均值 |
 | `threshold` | 5 W m⁻² | 辐射 ≤ 阈值为夜间 |
 | `min_run_minutes` | 30 | 短于该时长的昼夜切换被忽略（夜间辐射噪声、白天短暂阴暗） |
 | `drop_partial` / `drop_gap` | true | 去掉首尾不完整夜晚 / 有缺测的夜晚 |
@@ -75,7 +77,7 @@ v1 的 `config.json` 可直接用 `-c config.json` 读取。
 Excel 文件包含：
 
 - `README`：输入文件、时间步长、全部参数（可复现）
-- `summary`：长表，每行 = 夜晚 × 样树 × 方法；列 `night_sum`（夜间实测液流总和）、`fit_sum`（拟合曲线总和，v1 中称 refilling curve）、`remainder = night_sum − fit_sum`、`ratio = fit_sum / night_sum`、`breakpoint`、`status`
+- `summary`：长表，每行 = 夜晚 × 样树 × 方法；列 `night_sum`（夜间实测液流总和）、`fit_sum`（夜间充水量）、`remainder = night_sum − fit_sum`（夜间蒸腾量）、`ratio = fit_sum / night_sum`、`breakpoint`、`status`
 - `nights`：每个夜晚的起止时间、点数、标记、当日辐射总量与最大值
 - `<method>_ratio / _fit_sum / _night_sum`：与 v1 相同结构的宽表（v1 的 `_rate / _night_sum / _sum`）
 - `<method>_fitting`（可选）：逐点实测值与拟合值

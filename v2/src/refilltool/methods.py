@@ -7,12 +7,11 @@ method is unchanged. Differences from v1 are limited to robustness:
   analytic derivative of the fitted exponential (difference < 1e-9).
 * Short nights, NaN values and fitting failures return a status message
   instead of crashing the whole run.
-* Et method: v1 zeroes the curve from ``default_point`` even when the knee is
-  detected automatically. Set ``zero_from_breakpoint=True`` (v2 default) to
-  use the detected breakpoint instead. Identical when ``kneed_process=False``.
+* Et method follows the paper (section 1.4.2 (4)): it uses the Re breakpoint
+  P2 and returns refilling = observed - min(late-night flow). The v1 code
+  differed from the paper and is kept only for ``legacy=True``.
 
-Each method returns a :class:`MethodResult`. ``fit`` is the curve that v1
-called the "refilling curve"; ``fit_sum`` is its sum (v1 sheet ``*_night_sum``),
+Each method returns a :class:`MethodResult`. ``fit`` is the refilling curve; ``fit_sum`` is nocturnal refilling (v1 sheet ``*_night_sum``),
 ``night_sum`` is the sum of observed night sap flow (v1 ``*_sum``) and
 ``ratio = fit_sum / night_sum`` (v1 ``*_rate``).
 """
@@ -35,7 +34,7 @@ DEFAULT_PARAMS = {
     "refilling": {"default_point": 30, "kneed_process": False},
     "line": {"default_point": 10, "kneed_process": False},
     "exp": {"default_point": 10, "kneed_process": False},
-    "et": {"default_point": 10, "kneed_process": False, "min_strategy": True},
+    "et": {"default_point": 10, "kneed_process": False, "min_strategy": True},  # breakpoint used only in legacy mode
 }
 
 
@@ -158,23 +157,38 @@ def extended_exp_refilling(y, default_point=10, kneed_process=False) -> MethodRe
     return _summarise(y, fit, bp, decay_b=b, decay_b_adjusted=b_adj)
 
 
-def extended_transpiration(y, default_point=10, kneed_process=False, min_strategy=True,
-                           zero_from_breakpoint=True) -> MethodResult:
-    """Et method: late-night baseline extended over the whole night (v1 logic)."""
+def extended_transpiration(y, default_point=30, kneed_process=False, min_strategy=True,
+                           paper=True, online=True) -> MethodResult:
+    """Et method (transpiration inversion), CJPE 2023.0043 section 1.4.2 (4).
+
+    Transpiration rate = minimum sap flow after the Re breakpoint P2, extended
+    over the whole night. Transpiration = n * rate; refilling = observed - rate.
+    ``fit`` is the refilling curve (observed - rate), consistent with the
+    other three methods, so ``fit_sum`` = nocturnal refilling.
+
+    ``paper=False`` reproduces the v1 code, which instead returned
+    observed[:bp] + rate (zero after bp) and thus mixed both components.
+    """
     y = np.asarray(y, dtype=float)
     msg = _precheck(y, default_point, 2)
     if msg:
         return _fail(y, msg)
-    bp = find_breakpoint(y, default_point, kneed_process, online=False)
+    bp = find_breakpoint(y, default_point, kneed_process, online=online)
     if bp == 0:
         return _fail(y, "skipped: breakpoint = 0", bp)
+    if paper:
+        base = float(y[bp:].min()) if min_strategy else float(np.mean(y[bp:]))
+        fit = y - base
+        return _summarise(y, fit, bp, transpiration_rate=base,
+                          transpiration_sum=base * len(y))
+    # ---- v1 code, kept for --legacy
     fit = y.copy()
-    fit[(bp if zero_from_breakpoint else default_point):] = 0
+    fit[default_point:] = 0
     if min_strategy:
         base = float((y[bp:] - fit[bp:]).min())
         fit = fit + base
     else:
-        base = float(np.mean(y[bp:]))  # least-squares constant == mean
+        base = float(np.mean(y[bp:]))
         fit = base + 0 * y
     return _summarise(y, fit, bp, baseline=base)
 
@@ -187,10 +201,14 @@ FUNCS = {
 }
 
 
-def run_method(name, y, params, legacy=False) -> MethodResult:
+def run_method(name, y, params, legacy=False, re_params=None) -> MethodResult:
     p = {**DEFAULT_PARAMS[name], **(params or {})}
     kw = dict(default_point=int(p["default_point"]), kneed_process=bool(p["kneed_process"]))
     if name == "et":
         kw["min_strategy"] = bool(p.get("min_strategy", True))
-        kw["zero_from_breakpoint"] = not legacy
+        if legacy:  # v1: own breakpoint (default 10 points, offline knee), v1 curve
+            kw.update(paper=False, online=False)
+        else:       # paper: use the Re breakpoint P2
+            rp = {**DEFAULT_PARAMS["refilling"], **(re_params or {})}
+            kw.update(default_point=int(rp["default_point"]), kneed_process=bool(rp["kneed_process"]))
     return FUNCS[name](y, **kw)
