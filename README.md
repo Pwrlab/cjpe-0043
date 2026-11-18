@@ -1,5 +1,7 @@
 # refilling tools
 
+> **新版 v2**（本地图形界面、Mac/Windows 通用、逐夜检查与数据质控）见 [`v2/`](v2/README.md)。
+
 
 
 ## 简介

@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refilltool"
+dynamic = ["version"]
+description = "Partition nighttime sap flow into refilling and transpiration (PWRlab, BJFU)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "numpy>=1.21",
+  "pandas>=1.4",
+  "scipy>=1.8",
+  "kneed>=0.8",
+  "openpyxl>=3.0",
+  "plotly>=5.0",
+  "streamlit>=1.30",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+refilltool = "refilltool.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "refilltool.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
